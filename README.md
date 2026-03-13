@@ -1,21 +1,21 @@
 # Stealth CDN Dashboard
 
-A lightweight dashboard to manage and serve files from a GitHub repository as CDN assets via the jsDelivr network.
+A professional, serverless dashboard to manage and serve files from a GitHub repository as CDN assets via the jsDelivr network. Exclusively optimized for Vercel.
 
 ---
 
 ## 🚀 Key Features
+* **Serverless Native**: Engineered strictly for Vercel Serverless Functions. No persistent processes.
 * **Instant CDN Integration**: Automatically generates `jsdelivr.net` links for every file.
 * **Secure Access**: Protected by password authentication and JWT session management.
 * **Stealth Mode**: Filenames are automatically obfuscated during upload for extra security.
 * **Modern UI**: Built with React 19, Tailwind CSS, and Framer Motion.
-* **Dual View**: Choose between Grid view for images or List view for detailed management.
 
 ---
 
 ## ⚙️ Configuration
 
-Fill your `.env` file with the following details:
+Set these Environment Variables in your Vercel Dashboard (**Settings > Environment Variables**):
 
 | Variable | Description |
 | :--- | :--- |
@@ -28,28 +28,33 @@ Fill your `.env` file with the following details:
 
 ---
 
-## 📦 Getting Started
+## 📦 Deployment (Vercel)
 
-1. **Install dependencies**:
-   ```bash
-   npm install
-   ```
+This application is engineered specifically for Vercel. Local persistent servers (`app.listen`) have been stripped to maximize serverless performance.
 
-2. **Run the application**:
-   ```bash
-   npm run dev
-   ```
-
-The application will run at `http://localhost:3000`.
+1. Push this repository to GitHub.
+2. Import the project into **Vercel**.
+3. Vercel will automatically detect the Vite frontend and build it.
+4. Add all required Environment Variables.
+5. Vercel will process `vercel.json`, compiling `server.ts` into a stateless Edge/Node Serverless Function mapped to `/api/*`.
+6. Click **Deploy**.
 
 ---
 
-## 📖 How to Use
+## 🛠️ Local Development
 
-1. **Login**: Enter the password configured in your `.env`.
-2. **Upload**: Drag & drop files into the upload area. Filenames will be randomized.
-3. **Copy Link**: Click the Copy icon to grab the jsDelivr CDN URL.
-4. **Manage**: You can Rename or Delete files directly from the dashboard.
+For local frontend development, use the standard Vite dev server:
+
+# Install Depedencies:
+```bash
+npm install
+```
+# Start the development server:
+```bash
+npm run dev
+```
+
+*(Note: Since the Express server acts as a Serverless Function, you can simulate the Vercel environment locally using the Vercel CLI via `vercel dev`)*
 
 ---
 <div align="center">

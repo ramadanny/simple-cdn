@@ -1,16 +1,12 @@
+// server.ts
 import express from "express";
-import { createServer as createViteServer } from "vite";
-import path from "path";
-import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
 import jwt from "jsonwebtoken";
 import { Octokit } from "@octokit/rest";
+import path from "path";
 
 dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const JWT_SECRET = process.env.JWT_SECRET || "default_secret";
@@ -28,176 +24,158 @@ const generateUniqueName = (originalName: string) => {
   return `${randomString}${ext}`;
 };
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+const app = express();
 
-  app.use(express.json({ limit: "50mb" }));
-  app.use(cookieParser());
+app.use(express.json({ limit: "50mb" }));
+app.use(cookieParser());
 
-  const authenticate = (req: any, res: any, next: any) => {
-    const token = req.cookies.admin_session;
-    if (!token) return res.status(401).json({ error: "Unauthorized" });
-    try {
-      jwt.verify(token, JWT_SECRET);
-      next();
-    } catch (err) {
-      res.status(401).json({ error: "Invalid session" });
+const authenticate = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const token = req.cookies.admin_session;
+  if (!token) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    jwt.verify(token, JWT_SECRET);
+    next();
+  } catch (err) {
+    res.status(401).json({ error: "Invalid session" });
+  }
+};
+
+app.post("/api/auth/login", (req, res) => {
+  const { password } = req.body;
+  if (password === ADMIN_PASSWORD) {
+    const token = jwt.sign({ admin: true }, JWT_SECRET, { expiresIn: "7d" });
+    res.cookie("admin_session", token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+    return res.json({ success: true });
+  }
+  res.status(401).json({ error: "Incorrect password" });
+});
+
+app.post("/api/auth/logout", (_, res) => {
+  res.clearCookie("admin_session");
+  res.json({ success: true });
+});
+
+app.get("/api/auth/check", (req, res) => {
+  const token = req.cookies.admin_session;
+  if (!token) return res.json({ authenticated: false });
+  try {
+    jwt.verify(token, JWT_SECRET);
+    res.json({ authenticated: true });
+  } catch (err) {
+    res.json({ authenticated: false });
+  }
+});
+
+app.get("/api/files", authenticate, async (_, res) => {
+  if (!GITHUB_TOKEN || !GITHUB_OWNER || !GITHUB_REPO) {
+    return res.status(500).json({ error: "GitHub configuration missing" });
+  }
+  try {
+    const { data } = await octokit.repos.getContent({
+      owner: GITHUB_OWNER,
+      repo: GITHUB_REPO,
+      path: "",
+      ref: GITHUB_BRANCH,
+    });
+
+    if (Array.isArray(data)) {
+      const files = data
+        .filter((item) => item.type === "file")
+        .map((item) => ({
+          name: item.name,
+          path: item.path,
+          sha: item.sha,
+          size: item.size,
+          download_url: item.download_url,
+          cdn_url: `https://cdn.jsdelivr.net/gh/${GITHUB_OWNER}/${GITHUB_REPO}@${GITHUB_BRANCH}/${item.path}`,
+        }));
+      res.json(files);
+    } else {
+      res.json([]);
     }
-  };
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
-  app.post("/api/auth/login", (req, res) => {
-    const { password } = req.body;
-    if (password === ADMIN_PASSWORD) {
-      const token = jwt.sign({ admin: true }, JWT_SECRET, { expiresIn: "7d" });
-      res.cookie("admin_session", token, {
-        httpOnly: true,
-        secure: true,
-        sameSite: "none",
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-      });
-      return res.json({ success: true });
-    }
-    res.status(401).json({ error: "Incorrect password" });
-  });
+app.post("/api/upload", authenticate, async (req, res) => {
+  const { name, content, message } = req.body;
+  try {
+    const uniqueName = generateUniqueName(name);
+    await octokit.repos.createOrUpdateFileContents({
+      owner: GITHUB_OWNER!,
+      repo: GITHUB_REPO!,
+      path: uniqueName,
+      message: message || `Upload ${uniqueName}`,
+      content,
+      branch: GITHUB_BRANCH,
+    });
+    res.json({ success: true, fileName: uniqueName });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
-  app.post("/api/auth/logout", (_, res) => {
-    res.clearCookie("admin_session");
+app.delete("/api/files/:path", authenticate, async (req, res) => {
+  const { sha } = req.query;
+  const { path: targetPath } = req.params;
+  try {
+    await octokit.repos.deleteFile({
+      owner: GITHUB_OWNER!,
+      repo: GITHUB_REPO!,
+      path: targetPath,
+      message: `Delete ${targetPath}`,
+      sha: sha as string,
+      branch: GITHUB_BRANCH,
+    });
     res.json({ success: true });
-  });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
-  app.get("/api/auth/check", (req, res) => {
-    const token = req.cookies.admin_session;
-    if (!token) return res.json({ authenticated: false });
-    try {
-      jwt.verify(token, JWT_SECRET);
-      res.json({ authenticated: true });
-    } catch (err) {
-      res.json({ authenticated: false });
-    }
-  });
+app.patch("/api/files/:path/rename", authenticate, async (req, res) => {
+  const oldPath = req.params.path;
+  const { newPath, sha } = req.body;
+  try {
+    const { data: fileData } = await octokit.repos.getContent({
+      owner: GITHUB_OWNER!,
+      repo: GITHUB_REPO!,
+      path: oldPath,
+      ref: GITHUB_BRANCH,
+    });
 
-  app.get("/api/files", authenticate, async (_, res) => {
-    if (!GITHUB_TOKEN || !GITHUB_OWNER || !GITHUB_REPO) {
-      return res.status(500).json({ error: "GitHub configuration missing" });
-    }
-    try {
-      const { data } = await octokit.repos.getContent({
-        owner: GITHUB_OWNER,
-        repo: GITHUB_REPO,
-        path: "",
-        ref: GITHUB_BRANCH,
-      });
-
-      if (Array.isArray(data)) {
-        const files = data
-          .filter((item) => item.type === "file")
-          .map((item) => ({
-            name: item.name,
-            path: item.path,
-            sha: item.sha,
-            size: item.size,
-            download_url: item.download_url,
-            cdn_url: `https://cdn.jsdelivr.net/gh/${GITHUB_OWNER}/${GITHUB_REPO}@${GITHUB_BRANCH}/${item.path}`,
-          }));
-        res.json(files);
-      } else {
-        res.json([]);
-      }
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  app.post("/api/upload", authenticate, async (req, res) => {
-    const { name, content, message } = req.body;
-    try {
-      const uniqueName = generateUniqueName(name);
+    if ("content" in fileData) {
       await octokit.repos.createOrUpdateFileContents({
         owner: GITHUB_OWNER!,
         repo: GITHUB_REPO!,
-        path: uniqueName,
-        message: message || `Upload ${uniqueName}`,
-        content,
+        path: newPath,
+        message: `Rename ${oldPath} to ${newPath}`,
+        content: fileData.content,
         branch: GITHUB_BRANCH,
       });
-      res.json({ success: true, fileName: uniqueName });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
 
-  app.delete("/api/files/:path", authenticate, async (req, res) => {
-    const { sha } = req.query;
-    const { path } = req.params;
-    try {
       await octokit.repos.deleteFile({
         owner: GITHUB_OWNER!,
         repo: GITHUB_REPO!,
-        path,
-        message: `Delete ${path}`,
-        sha: sha as string,
+        path: oldPath,
+        message: `Cleanup after rename`,
+        sha,
         branch: GITHUB_BRANCH,
       });
+
       res.json({ success: true });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
+    } else {
+      res.status(400).json({ error: "Could not get file content" });
     }
-  });
-
-  app.patch("/api/files/:path/rename", authenticate, async (req, res) => {
-    const oldPath = req.params.path;
-    const { newPath, sha } = req.body;
-    try {
-      const { data: fileData } = await octokit.repos.getContent({
-        owner: GITHUB_OWNER!,
-        repo: GITHUB_REPO!,
-        path: oldPath,
-        ref: GITHUB_BRANCH,
-      });
-
-      if ("content" in fileData) {
-        await octokit.repos.createOrUpdateFileContents({
-          owner: GITHUB_OWNER!,
-          repo: GITHUB_REPO!,
-          path: newPath,
-          message: `Rename ${oldPath} to ${newPath}`,
-          content: fileData.content,
-          branch: GITHUB_BRANCH,
-        });
-
-        await octokit.repos.deleteFile({
-          owner: GITHUB_OWNER!,
-          repo: GITHUB_REPO!,
-          path: oldPath,
-          message: `Cleanup after rename`,
-          sha,
-          branch: GITHUB_BRANCH,
-        });
-
-        res.json({ success: true });
-      } else {
-        res.status(400).json({ error: "Could not get file content" });
-      }
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (_, res) => res.sendFile(path.join(distPath, "index.html")));
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
   }
+});
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
-}
-
+export default app;

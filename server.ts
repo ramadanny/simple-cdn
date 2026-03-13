@@ -1,12 +1,16 @@
-// server.ts
 import express from "express";
+import { createServer as createViteServer } from "vite";
+import path from "path";
+import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
 import jwt from "jsonwebtoken";
 import { Octokit } from "@octokit/rest";
-import path from "path";
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const JWT_SECRET = process.env.JWT_SECRET || "default_secret";
@@ -25,11 +29,12 @@ const generateUniqueName = (originalName: string) => {
 };
 
 const app = express();
+const PORT = 3000;
 
 app.use(express.json({ limit: "50mb" }));
 app.use(cookieParser());
 
-const authenticate = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+const authenticate = (req: any, res: any, next: any) => {
   const token = req.cookies.admin_session;
   if (!token) return res.status(401).json({ error: "Unauthorized" });
   try {
@@ -123,13 +128,13 @@ app.post("/api/upload", authenticate, async (req, res) => {
 
 app.delete("/api/files/:path", authenticate, async (req, res) => {
   const { sha } = req.query;
-  const { path: targetPath } = req.params;
+  const { path: routePath } = req.params;
   try {
     await octokit.repos.deleteFile({
       owner: GITHUB_OWNER!,
       repo: GITHUB_REPO!,
-      path: targetPath,
-      message: `Delete ${targetPath}`,
+      path: routePath,
+      message: `Delete ${routePath}`,
       sha: sha as string,
       branch: GITHUB_BRANCH,
     });
@@ -177,5 +182,25 @@ app.patch("/api/files/:path/rename", authenticate, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+if (!process.env.VERCEL) {
+  (async () => {
+    if (process.env.NODE_ENV !== "production") {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } else {
+      const distPath = path.join(process.cwd(), "dist");
+      app.use(express.static(distPath));
+      app.get("*", (_, res) => res.sendFile(path.join(distPath, "index.html")));
+    }
+
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  })();
+}
 
 export default app;

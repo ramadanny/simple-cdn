@@ -12,14 +12,21 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
-const JWT_SECRET = process.env.JWT_SECRET || "super-secret-key";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+const JWT_SECRET = process.env.JWT_SECRET || "default_secret";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_OWNER = process.env.GITHUB_OWNER;
 const GITHUB_REPO = process.env.GITHUB_REPO;
 const GITHUB_BRANCH = process.env.GITHUB_BRANCH || "main";
 
 const octokit = new Octokit({ auth: GITHUB_TOKEN });
+
+const generateUniqueName = (originalName: string) => {
+  const ext = path.extname(originalName);
+  const randomString = Math.random().toString(36).substring(2, 10) + 
+                       Math.random().toString(36).substring(2, 10);
+  return `${randomString}${ext}`;
+};
 
 async function startServer() {
   const app = express();
@@ -28,7 +35,6 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(cookieParser());
 
-  // Auth Middleware
   const authenticate = (req: any, res: any, next: any) => {
     const token = req.cookies.admin_session;
     if (!token) return res.status(401).json({ error: "Unauthorized" });
@@ -40,7 +46,6 @@ async function startServer() {
     }
   };
 
-  // Auth Routes
   app.post("/api/auth/login", (req, res) => {
     const { password } = req.body;
     if (password === ADMIN_PASSWORD) {
@@ -56,7 +61,7 @@ async function startServer() {
     res.status(401).json({ error: "Incorrect password" });
   });
 
-  app.post("/api/auth/logout", (req, res) => {
+  app.post("/api/auth/logout", (_, res) => {
     res.clearCookie("admin_session");
     res.json({ success: true });
   });
@@ -72,8 +77,7 @@ async function startServer() {
     }
   });
 
-  // GitHub Proxy Routes
-  app.get("/api/files", authenticate, async (req, res) => {
+  app.get("/api/files", authenticate, async (_, res) => {
     if (!GITHUB_TOKEN || !GITHUB_OWNER || !GITHUB_REPO) {
       return res.status(500).json({ error: "GitHub configuration missing" });
     }
@@ -108,15 +112,16 @@ async function startServer() {
   app.post("/api/upload", authenticate, async (req, res) => {
     const { name, content, message } = req.body;
     try {
+      const uniqueName = generateUniqueName(name);
       await octokit.repos.createOrUpdateFileContents({
         owner: GITHUB_OWNER!,
         repo: GITHUB_REPO!,
-        path: name,
-        message: message || `Upload ${name}`,
-        content: content, // base64
+        path: uniqueName,
+        message: message || `Upload ${uniqueName}`,
+        content,
         branch: GITHUB_BRANCH,
       });
-      res.json({ success: true });
+      res.json({ success: true, fileName: uniqueName });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -124,7 +129,7 @@ async function startServer() {
 
   app.delete("/api/files/:path", authenticate, async (req, res) => {
     const { sha } = req.query;
-    const path = req.params.path;
+    const { path } = req.params;
     try {
       await octokit.repos.deleteFile({
         owner: GITHUB_OWNER!,
@@ -144,7 +149,6 @@ async function startServer() {
     const oldPath = req.params.path;
     const { newPath, sha } = req.body;
     try {
-      // 1. Get file content
       const { data: fileData } = await octokit.repos.getContent({
         owner: GITHUB_OWNER!,
         repo: GITHUB_REPO!,
@@ -153,7 +157,6 @@ async function startServer() {
       });
 
       if ("content" in fileData) {
-        // 2. Create new file
         await octokit.repos.createOrUpdateFileContents({
           owner: GITHUB_OWNER!,
           repo: GITHUB_REPO!,
@@ -163,13 +166,12 @@ async function startServer() {
           branch: GITHUB_BRANCH,
         });
 
-        // 3. Delete old file
         await octokit.repos.deleteFile({
           owner: GITHUB_OWNER!,
           repo: GITHUB_REPO!,
           path: oldPath,
-          message: `Cleanup after rename to ${newPath}`,
-          sha: sha,
+          message: `Cleanup after rename`,
+          sha,
           branch: GITHUB_BRANCH,
         });
 
@@ -182,7 +184,6 @@ async function startServer() {
     }
   });
 
-  // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -192,9 +193,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
+    app.get("*", (_, res) => res.sendFile(path.join(distPath, "index.html")));
   }
 
   app.listen(PORT, "0.0.0.0", () => {
@@ -202,4 +201,3 @@ async function startServer() {
   });
 }
 
-startServer();

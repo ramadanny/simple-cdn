@@ -1,5 +1,0 @@
-{
-  "name": "Stealth CDN Dashboard",
-  "description": "A personal dashboard to manage and serve files from a GitHub repository as CDN assets.",
-  "requestFramePermissions": []
-}

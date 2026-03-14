@@ -1,6 +1,6 @@
-# Stealth CDN Dashboard
+# Simple CDN Dashboard
 
-A professional, serverless dashboard to manage and serve files from a GitHub repository as CDN assets via the jsDelivr network. Exclusively optimized for Vercel.
+A simple, serverless dashboard to manage and serve files from a GitHub repository as CDN assets via the jsDelivr network. Exclusively optimized for Vercel.
 
 ---
 

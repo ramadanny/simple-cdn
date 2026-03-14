@@ -165,7 +165,7 @@ export default function App() {
             <div className="w-16 h-16 bg-zinc-900 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-zinc-900/20">
               <ExternalLink className="text-white w-8 h-8" />
             </div>
-            <h1 className="text-2xl font-bold text-zinc-900">Stealth CDN</h1>
+            <h1 className="text-2xl font-bold text-zinc-900">Simple CDN</h1>
             <p className="text-zinc-500 mt-1">Enter password to access dashboard</p>
           </div>
 
@@ -331,7 +331,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
             <div className="w-10 h-10 bg-zinc-900 rounded-xl flex items-center justify-center shadow-lg shadow-zinc-900/20">
               <ExternalLink className="text-white w-5 h-5" />
             </div>
-            <h1 className="text-xl font-bold text-zinc-900 hidden sm:block">Stealth CDN</h1>
+            <h1 className="text-xl font-bold text-zinc-900 hidden sm:block">Simple CDN</h1>
           </div>
 
           <div className="flex items-center gap-2">
